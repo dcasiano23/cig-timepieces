@@ -1,6 +1,6 @@
 // Keeps CIG Timepieces working offline. Bump VERSION after changing any file.
-const VERSION = "cig-timepieces-v1";
-const FILES = ["./", "index.html", "app.css", "app.js", "catalog.js", "docs.js", "manifest.webmanifest", "icon-64.png", "logo-ink.png", "logo-silver.png", "icon-192.png", "icon-512.png"];
+const VERSION = "cig-timepieces-v2";
+const FILES = ["./", "index.html", "app.css", "app.js", "catalog.js", "docs.js", "manifest.webmanifest", "icon-64.png", "icon-180.png", "logo-ink.png", "logo-silver.png", "icon-192.png", "icon-512.png"];
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(VERSION).then((c) => c.addAll(FILES)).then(() => self.skipWaiting()));
