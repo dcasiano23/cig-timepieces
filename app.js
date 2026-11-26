@@ -5,8 +5,8 @@
   "use strict";
 
   const KEY = "watch-ledger.v1";
-  const APP_VERSION = "1.9";
-  const WHATS_NEW = "Clearer live-price status in the Market snapshot.";
+  const APP_VERSION = "2.0";
+  const WHATS_NEW = "Erase all data can now be undone for 30 days. Typing a serial in Market finds its watch.";
   const CAT = window.WatchCatalog;
   const DOCS = window.WatchDocs;
   const $ = (sel, root = document) => root.querySelector(sel);
@@ -425,10 +425,18 @@
   }
 
   /* In-app confirmation (the browser's own pop-ups can freeze iPhone home-screen apps). */
-  function ask(message, { ok = "OK", cancel = "Cancel", danger = false, buttons } = {}) {
+  function ask(message, { ok = "OK", cancel = "Cancel", danger = false, buttons, typed } = {}) {
     const dlg = $("#ask");
     const list = buttons || [{ label: cancel, value: false }, { label: ok, value: true, kind: danger ? "danger-fill" : "primary" }];
-    dlg.innerHTML = `<form method="dialog" class="ask-box"><p>${esc(message).replace(/\n/g, "<br>")}</p><div class="ask-actions">${list.map((b, i) => `<button class="btn ${b.kind || ""}" value="${i}">${esc(b.label)}</button>`).join("")}</div></form>`;
+    dlg.innerHTML = `<form method="dialog" class="ask-box"><p>${esc(message).replace(/\n/g, "<br>")}</p>
+      ${typed ? `<label class="ask-typed">Type <strong>${esc(typed)}</strong> to confirm<input autocomplete="off" autocapitalize="characters" spellcheck="false"></label>` : ""}
+      <div class="ask-actions">${list.map((b, i) => `<button class="btn ${b.kind || ""}" value="${i}">${esc(b.label)}</button>`).join("")}</div></form>`;
+    if (typed) {
+      const inp = $(".ask-typed input", dlg), go = $$(".ask-actions .btn", dlg).at(-1);
+      const check = () => { go.disabled = inp.value.trim().toUpperCase() !== typed; };
+      inp.addEventListener("input", check); check();
+      setTimeout(() => inp.focus(), 50);
+    }
     return new Promise((res) => {
       dlg.addEventListener("close", () => { const i = dlg.returnValue; res(i === "" || i == null ? (buttons ? null : false) : list[+i].value); }, { once: true });
       dlg.returnValue = "";
@@ -1535,7 +1543,8 @@
     const entry = CAT.find(q);
     const known = !!entry || CAT.REFDB.lookup(q)?.how === "list" || db.comps.some((c) => normRef(c.ref) === normRef(q)) || db.watches.some((w) => normRef(w.ref) === normRef(q));
     const longer = [...CAT.REFDB.refs, ...db.watches.map((w) => w.ref), ...db.comps.map((c) => c.ref)].some((r) => r && normRef(r).startsWith(normRef(q)) && normRef(r) !== normRef(q));
-    const exactRef = known || (/\d/.test(q) && normRef(q).length >= 5 && !longer);
+    const isSerial = db.watches.some((w) => w.serial && normRef(w.serial) === normRef(q));
+    const exactRef = known || (!isSerial && /\d/.test(q) && normRef(q).length >= 5 && !longer);
     let comps, m90, m180, mAll;
     if (exactRef) {
       m90 = marketFor(target, { days: 90 });
@@ -1565,7 +1574,14 @@
               <div class="sub">${m180.askingCount ? `${m180.askingCount} listings${m180.median ? " · " + pct((m180.askingMedian - m180.median) / m180.median) + " above sold" : ""}` : "none logged"}</div></div>
           </div>
           ${mineHist && mineHist.paid.length ? `<div class="note" style="margin-top:10px">You've paid ${mineHist.paid.map((x) => money0(num(x.buyPrice))).slice(0, 6).join(", ")}${mineHist.paid.length > 6 ? "…" : ""} for this reference (most recent first).</div>` : ""}`
-        : `<h2>Comps matching “${esc(q)}”</h2>${(() => {
+        : `${(() => {
+            const k = normRef(q);
+            const hits = k.length >= 4 ? db.watches.filter((w) => w.serial && normRef(w.serial) === k && w.ref) : [];
+            return hits.length ? `<div class="card serial-hit"><div class="muted" style="font-size:13px">Serial ${esc(q)} is your</div>
+              <div class="detail-title" style="font-size:20px">${esc(label(hits[0]))} <span class="ref">${esc(hits[0].ref)}</span></div>
+              <div class="row-actions" style="margin-top:10px"><button type="button" class="btn small primary" data-suggest="${esc(hits[0].ref)}">See market for ${esc(hits[0].ref)}</button>
+              <button type="button" class="btn small" data-openwatch="${esc(hits[0].id)}">Open this watch</button></div></div>` : "";
+          })()}<h2>Comps matching “${esc(q)}”</h2><p class="muted" style="margin:4px 0 0;font-size:13px">Market works by <strong>reference number</strong> (the model, e.g. 126610LN). To find a watch by serial, use the search in Inventory.</p>${(() => {
             const k = normRef(q);
             if (k.length < 4) return "";
             const refs = [...new Set([...CAT.REFDB.refs, ...db.watches.map((w) => w.ref), ...db.comps.map((c) => c.ref)].filter((r) => r && normRef(r).startsWith(k) && normRef(r) !== k))].slice(0, 8);
@@ -1604,6 +1620,7 @@
       </div>
     `;
     $("#add-comp-2").addEventListener("click", () => editComp(target));
+    $$("[data-openwatch]", out).forEach((b) => b.addEventListener("click", () => showWatch(b.dataset.openwatch)));
     $$("[data-suggest]", out).forEach((b) => b.addEventListener("click", () => { ui.mq = b.dataset.suggest; $("#mq").value = ui.mq; drawMarket(); window.scrollTo({ top: 0 }); }));
     if (exactRef) { drawPlan(target); drawSnapshot(target); }
     let qkind = "sold";
@@ -1927,6 +1944,11 @@
           <button class="btn" id="demo">Load sample data</button>
           <button class="btn danger" id="wipe">Erase all data</button>
         </div>
+        ${(() => { const u = erasedCopy(); if (!u) return ""; const until = new Date(Date.parse(u.at) + UNDO_DAYS * 864e5);
+          return `<div class="okbox" style="margin-top:12px"><strong>Erased data can be restored.</strong> ${u.watches.length} watch${u.watches.length === 1 ? "" : "es"} and ${(u.comps || []).length} comps erased ${esc(fmtWhen(u.at))}. Available until ${esc(fmtDate(until.toISOString()))}.
+            <div class="row-actions" style="margin-top:8px"><button class="btn small primary" id="restore">Restore erased data</button></div></div>`; })()}
+        <div>
+        </div>
       </div>
       <p class="muted version-line">CIG Timepieces app · version ${APP_VERSION}</p>
     `;
@@ -2022,12 +2044,41 @@
       loadDemo(); save(); toast("Sample data loaded"); location.hash = "#inventory";
     });
     $("#wipe").addEventListener("click", async () => {
-      if (!(await ask("Erase ALL watches, comps, photos and videos on this device? This cannot be undone — export a backup first if you need one.", { ok: "Erase everything", danger: true }))) return;
+      if (!(await ask("Erase all watches, comps, photos and videos?\n\nYou can restore them from this page for 30 days.", { ok: "Erase everything", danger: true, typed: "ERASE" }))) return;
+      try { localStorage.setItem(UNDO_KEY, JSON.stringify({ at: new Date().toISOString(), watches: db.watches, comps: db.comps, refLooks: db.refLooks })); }
+      catch { await ask("Couldn't keep a restorable copy on this device, so nothing was erased. Export a backup first, then try again.", { buttons: [{ label: "OK", value: true, kind: "primary" }] }); return; }
       db = { ...blank(), business: db.business, settings: db.settings };
-      try { await mediaDB.clear(); } catch {}
-      media.clear();
-      save(); render(); toast("All data erased");
+      save(); render();
+      toast("All data erased", { action: { label: "Undo", fn: restoreErased } });
     });
+    $("#restore")?.addEventListener("click", restoreErased);
+  }
+
+  /* ---------- Undo for "Erase all data" (kept 30 days; photos/videos stay stored until then) ---------- */
+  const UNDO_KEY = "watch-ledger.undo";
+  const UNDO_DAYS = 30;
+  function erasedCopy() {
+    try { const u = JSON.parse(localStorage.getItem(UNDO_KEY) || "null"); return u && Array.isArray(u.watches) ? u : null; } catch { return null; }
+  }
+  function restoreErased() {
+    const u = erasedCopy();
+    if (!u) { toast("Nothing to restore."); return; }
+    const ids = new Set(db.watches.map((w) => w.id)), cids = new Set(db.comps.map((c) => c.id));
+    db.watches.push(...u.watches.filter((w) => !ids.has(w.id)));
+    db.comps.push(...(u.comps || []).filter((c) => !cids.has(c.id)));
+    db.refLooks = { ...(u.refLooks || {}), ...db.refLooks };
+    save();
+    try { localStorage.removeItem(UNDO_KEY); } catch {}
+    render();
+    toast(`Restored ${u.watches.length} watch${u.watches.length === 1 ? "" : "es"} and ${(u.comps || []).length} comps`);
+  }
+  /* After 30 days the erased copy and its photos/videos are removed for good. */
+  async function purgeOldErase() {
+    const u = erasedCopy();
+    if (!u || Date.now() - Date.parse(u.at) < UNDO_DAYS * 864e5) return;
+    try { localStorage.removeItem(UNDO_KEY); } catch {}
+    const keep = new Set(db.watches.map((w) => w.id));
+    for (const [wid, list] of media) if (!keep.has(wid)) for (const m of list) await removeMedia(wid, m.id).catch(() => {});
   }
 
   function applyTheme() {
@@ -2144,7 +2195,7 @@
   renderBrand();
   route();
   announceUpdate();
-  loadMedia().then(() => { if (media.size) render(); });
+  loadMedia().then(() => { purgeOldErase(); if (media.size) render(); });
 
   if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost")) {
     // Check for a new version on every open and whenever the app comes back to the screen;
