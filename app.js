@@ -5,8 +5,8 @@
   "use strict";
 
   const KEY = "watch-ledger.v1";
-  const APP_VERSION = "2.0";
-  const WHATS_NEW = "Erase all data can now be undone for 30 days. Typing a serial in Market finds its watch.";
+  const APP_VERSION = "2.1";
+  const WHATS_NEW = "Erase all data can now be undone for 30 days. Market shows what to do when a reference has no prices yet.";
   const CAT = window.WatchCatalog;
   const DOCS = window.WatchDocs;
   const $ = (sel, root = document) => root.querySelector(sel);
@@ -1566,7 +1566,7 @@
           ${entry ? `<button class="linkbtn" id="see-cfg">See every configuration</button>` : ""}</div>
         </div>
         <div class="card snapshot" id="snapshot"></div>
-        <div class="stats" style="margin-top:12px">
+        <div class="stats" style="margin-top:12px" ${mAll.soldCount || mAll.askingCount ? "" : "hidden"}>
             ${stat("Median sold · 90 days", m90)}
             ${stat("Median sold · 180 days", m180)}
             ${stat("Median sold · all time", mAll)}
@@ -1702,6 +1702,10 @@
         ${tile("Actually sells", sell ? money0(sell) : "—", sell ? `median of ${bm.m.soldCount} sale${bm.m.soldCount > 1 ? "s" : ""} · ${bm.days} days` : "log sold prices below")}
         ${tile("Buy at or below", mb ? money0(mb.max) : "—", mb ? (p.profit ? `for ${money0(p.profit)} profit` : "break-even — set your profit") : "needs sold prices", "buy")}
       </div>
+      ${!ask && !sell && liveState !== "loading" ? `<div class="snap-empty"><strong>No prices for ${esc(target.ref || "this reference")} yet.</strong>
+          Tap below, note a few recent sale prices (skip "Best offer accepted"), then add them under <em>Add the prices you just looked up</em>.
+          <div class="row-actions" style="margin-top:8px"><a class="btn small primary" target="_blank" rel="noopener" href="https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(target.ref || "")}&_sacat=31387&LH_Sold=1&LH_Complete=1&_sop=13">eBay — sold listings</a>
+          <button type="button" class="btn small" id="go-quick">Add prices</button></div></div>` : ""}
       ${ask && sell ? `<p class="snap-gap">Sellers are asking <strong>${pct(Math.abs(ask - sell) / sell)} ${ask >= sell ? "above" : "below"}</strong> what it really sells for (${ask >= sell ? "+" : "−"}${money0(Math.abs(ask - sell))}).</p>` : ""}
       ${mb && !p.profit && !p.fee ? `<p class="snap-gap">Set your selling fees and target profit in <strong>What to pay</strong> below to get your true buy price.</p>` : ""}
       ${eb ? `<details class="live-list"><summary>Cheapest on eBay right now (${eb.count} listing${eb.count > 1 ? "s" : ""}, ${money0(eb.low)}–${money0(eb.high)})</summary>
@@ -1713,6 +1717,7 @@
       ${liveOn() ? `<div class="live-foot">${liveState === "loading" ? "Checking eBay…" : liveState === "ok" ? (eb ? `Live eBay prices · updated ${esc(fmtWhen(live?.fetched))}` : live?.errors?.some((x) => /keys not set/i.test(x)) ? "Live eBay prices: eBay keys not added yet" : live?.errors?.length ? `<span class="neg">${esc(live.errors[0])}</span>` : "No eBay listings found for this reference right now") : liveState ? `<span class="neg">Live prices unavailable: ${esc(liveState)}</span>` : ""}
           ${liveState !== "loading" ? `<button type="button" class="linkbtn" id="live-refresh">Refresh</button>` : ""}</div>`
         : `<p class="snap-gap">Want these filled in automatically? Turn on <a href="#settings">Live market data</a> in Business.</p>`}`;
+    $("#go-quick", box)?.addEventListener("click", () => { const f = $("#quick"); f?.scrollIntoView({ behavior: "smooth", block: "start" }); setTimeout(() => f?.prices?.focus(), 400); });
     $("#live-refresh", box)?.addEventListener("click", () => {
       drawSnapshot(target, null, "loading");
       liveLookup(target, true).then((d) => drawSnapshot(target, d, "ok")).catch((e) => drawSnapshot(target, null, e.message));

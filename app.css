@@ -651,3 +651,6 @@ dialog.ask { width: min(380px, calc(100% - 32px)); margin: auto; border-radius: 
 .ask-typed input { margin-top: 6px; text-transform: uppercase; letter-spacing: 0.1em; }
 .ask-actions .btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .serial-hit { margin-bottom: 14px; }
+
+.snap-empty { margin-top: 12px; padding: 10px 12px; border-radius: 12px; background: var(--surface-2); font-size: 13px; color: var(--muted); }
+.snap-empty strong { color: var(--text); }
