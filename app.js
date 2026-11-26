@@ -5,8 +5,8 @@
   "use strict";
 
   const KEY = "watch-ledger.v1";
-  const APP_VERSION = "1.8";
-  const WHATS_NEW = "Live market data: connect your helper in Business to fill in eBay asking prices automatically.";
+  const APP_VERSION = "1.9";
+  const WHATS_NEW = "Clearer live-price status in the Market snapshot.";
   const CAT = window.WatchCatalog;
   const DOCS = window.WatchDocs;
   const $ = (sel, root = document) => root.querySelector(sel);
@@ -1693,7 +1693,7 @@
             <div class="item-main"><div class="title live-title">${esc(it.title)}</div><div class="meta">${esc(it.condition)}</div></div>
             <div class="right"><div class="big">${money0(it.price)}</div><div class="meta">asking</div></div></a>`).join("")}</div>
         </details>` : ""}
-      ${liveOn() ? `<div class="live-foot">${liveState === "loading" ? "Checking eBay…" : liveState === "ok" ? `Live eBay prices · updated ${esc(fmtWhen(live?.fetched))}` : liveState ? `<span class="neg">Live prices unavailable: ${esc(liveState)}</span>` : ""}
+      ${liveOn() ? `<div class="live-foot">${liveState === "loading" ? "Checking eBay…" : liveState === "ok" ? (eb ? `Live eBay prices · updated ${esc(fmtWhen(live?.fetched))}` : live?.errors?.some((x) => /keys not set/i.test(x)) ? "Live eBay prices: eBay keys not added yet" : live?.errors?.length ? `<span class="neg">${esc(live.errors[0])}</span>` : "No eBay listings found for this reference right now") : liveState ? `<span class="neg">Live prices unavailable: ${esc(liveState)}</span>` : ""}
           ${liveState !== "loading" ? `<button type="button" class="linkbtn" id="live-refresh">Refresh</button>` : ""}</div>`
         : `<p class="snap-gap">Want these filled in automatically? Turn on <a href="#settings">Live market data</a> in Business.</p>`}`;
     $("#live-refresh", box)?.addEventListener("click", () => {
