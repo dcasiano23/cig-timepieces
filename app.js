@@ -5,6 +5,8 @@
   "use strict";
 
   const KEY = "watch-ledger.v1";
+  const APP_VERSION = "1.5";
+  const WHATS_NEW = "Market now shows what sellers are asking next to real sold prices.";
   const CAT = window.WatchCatalog;
   const DOCS = window.WatchDocs;
   const $ = (sel, root = document) => root.querySelector(sel);
@@ -1840,6 +1842,7 @@
           <button class="btn danger" id="wipe">Erase all data</button>
         </div>
       </div>
+      <p class="muted version-line">CIG Timepieces app · version ${APP_VERSION}</p>
     `;
     navigator.storage?.estimate?.().then((e) => { const q = $("#quota"); if (q && e.quota) q.textContent = `· ${fmtSize(e.usage) || "0 KB"} used of ${fmtSize(e.quota)} available`; }).catch(() => {});
 
@@ -2023,12 +2026,21 @@
   }
 
   /* ---------- Start ---------- */
+  function announceUpdate() {
+    const seen = db.settings.seenVersion;
+    if (seen === APP_VERSION) return;
+    const hadData = seen || db.watches.length || db.comps.length;
+    db.settings.seenVersion = APP_VERSION;
+    save();
+    if (hadData) setTimeout(() => toast(`Updated to version ${APP_VERSION}. ${WHATS_NEW}`, { ms: 7000 }), 600);
+  }
   
 
   $("#btn-add").addEventListener("click", () => editWatch());
   applyTheme();
   renderBrand();
   route();
+  announceUpdate();
   loadMedia().then(() => { if (media.size) render(); });
 
   if ("serviceWorker" in navigator && location.protocol === "https:") {

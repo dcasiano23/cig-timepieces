@@ -621,3 +621,5 @@ dialog.ask { width: min(380px, calc(100% - 32px)); margin: auto; border-radius: 
 @media (max-width: 420px) { .gap-val { font-size: 20px; } }
 .ask-note { border-left: 3px solid var(--warn); }
 #quick.asking { border-color: var(--warn-line); }
+
+.version-line { text-align: center; font-size: 12px; margin: 24px 0 8px; }
