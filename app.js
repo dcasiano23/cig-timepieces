@@ -5,8 +5,8 @@
   "use strict";
 
   const KEY = "watch-ledger.v1";
-  const APP_VERSION = "1.5";
-  const WHATS_NEW = "Market now shows what sellers are asking next to real sold prices.";
+  const APP_VERSION = "1.6";
+  const WHATS_NEW = "Updates now arrive automatically. Market shows what sellers are asking next to real sold prices.";
   const CAT = window.WatchCatalog;
   const DOCS = window.WatchDocs;
   const $ = (sel, root = document) => root.querySelector(sel);
@@ -2043,7 +2043,19 @@
   announceUpdate();
   loadMedia().then(() => { if (media.size) render(); });
 
-  if ("serviceWorker" in navigator && location.protocol === "https:") {
-    navigator.serviceWorker.register("sw.js").catch(() => {});
+  if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost")) {
+    // Check for a new version on every open and whenever the app comes back to the screen;
+    // when one has been installed, reload once so it shows straight away.
+    const hadController = !!navigator.serviceWorker.controller;
+    navigator.serviceWorker.register("sw.js", { updateViaCache: "none" }).then((reg) => {
+      document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") reg.update().catch(() => {}); });
+    }).catch(() => {});
+    let reloading = false;
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      if (!hadController || reloading) return;
+      if (sheet.open || $("#ask").open) return; // don't interrupt something you're typing; it applies next open
+      reloading = true;
+      location.reload();
+    });
   }
 })();
