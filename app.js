@@ -5,8 +5,8 @@
   "use strict";
 
   const KEY = "watch-ledger.v1";
-  const APP_VERSION = "1.6";
-  const WHATS_NEW = "Updates now arrive automatically. Market shows what sellers are asking next to real sold prices.";
+  const APP_VERSION = "1.7";
+  const WHATS_NEW = "Market now opens with a snapshot: what sellers ask, what it really sells for, and what to pay.";
   const CAT = window.WatchCatalog;
   const DOCS = window.WatchDocs;
   const $ = (sel, root = document) => root.querySelector(sel);
@@ -1489,7 +1489,7 @@
       <a class="btn small" target="_blank" rel="noopener" href="https://www.chrono24.com/search/index.htm?query=${enc}">Chrono24</a>
       <a class="btn small" target="_blank" rel="noopener" href="https://www.ebay.com/sch/i.html?_nkw=${enc}&_sacat=31387&LH_BIN=1&_sop=15${floor}">eBay — Buy It Now</a>
       <a class="btn small" target="_blank" rel="noopener" href="https://www.facebook.com/marketplace/search/?query=${named}">Facebook Marketplace</a>
-      <a class="btn small" target="_blank" rel="noopener" href="https://www.reddit.com/r/Watchexchange/search/?q=${enc}&restrict_sr=1&sort=new">Reddit r/Watchexchange</a>
+      <a class="btn small" target="_blank" rel="noopener" href="https://www.google.com/search?q=${encodeURIComponent("site:reddit.com/r/Watchexchange " + q)}">Reddit r/Watchexchange</a>
       <a class="btn small" target="_blank" rel="noopener" href="https://www.google.com/search?tbm=shop&q=${named}">Google Shopping</a>
     </div>`;
   }
@@ -1554,6 +1554,7 @@
           ${entry ? `<p class="muted" style="margin:4px 0 0">${esc(entry.note)}</p>` : ""}
           ${entry ? `<button class="linkbtn" id="see-cfg">See every configuration</button>` : ""}</div>
         </div>
+        <div class="card snapshot" id="snapshot"></div>
         <div class="stats" style="margin-top:12px">
             ${stat("Median sold · 90 days", m90)}
             ${stat("Median sold · 180 days", m180)}
@@ -1562,16 +1563,13 @@
               <div class="sub">${m180.askingCount ? `${m180.askingCount} listings${m180.median ? " · " + pct((m180.askingMedian - m180.median) / m180.median) + " above sold" : ""}` : "none logged"}</div></div>
           </div>
           ${mineHist && mineHist.paid.length ? `<div class="note" style="margin-top:10px">You've paid ${mineHist.paid.map((x) => money0(num(x.buyPrice))).slice(0, 6).join(", ")}${mineHist.paid.length > 6 ? "…" : ""} for this reference (most recent first).</div>` : ""}`
-        : `<h2>Comps matching “${esc(q)}”</h2>`}
+        : `<h2>Comps matching “${esc(q)}”</h2>${(() => {
+            const k = normRef(q);
+            if (k.length < 4) return "";
+            const refs = [...new Set([...CAT.REFDB.refs, ...db.watches.map((w) => w.ref), ...db.comps.map((c) => c.ref)].filter((r) => r && normRef(r).startsWith(k) && normRef(r) !== k))].slice(0, 8);
+            return refs.length ? `<div class="suggest"><span class="muted">Did you mean:</span> ${refs.map((r) => `<button type="button" class="chip" data-suggest="${esc(r)}">${esc(r)}</button>`).join("")}</div>` : "";
+          })()}`}
       </div>
-      ${exactRef && m180.median && m180.askingCount ? `<div class="section card gap-card">
-        <h3 style="margin:0 0 10px">Asking vs. actually selling · 180 days</h3>
-        <div class="gap-row">
-          <div><div class="label">Sellers ask</div><div class="gap-val">${money0(m180.askingMedian)}</div><div class="sub">median of ${m180.askingCount} listing${m180.askingCount > 1 ? "s" : ""}</div></div>
-          <div><div class="label">Actually sells</div><div class="gap-val">${money0(m180.median)}</div><div class="sub">median of ${m180.soldCount} sale${m180.soldCount > 1 ? "s" : ""}</div></div>
-          <div><div class="label">Gap</div><div class="gap-val ${m180.askingMedian >= m180.median ? "neg" : "pos"}">${m180.askingMedian >= m180.median ? "+" : "−"}${money0(Math.abs(m180.askingMedian - m180.median))}</div><div class="sub">${pct(Math.abs(m180.askingMedian - m180.median) / m180.median)} ${m180.askingMedian >= m180.median ? "above" : "below"} real sales</div></div>
-        </div>
-      </div>` : ""}
       ${exactRef ? `<div class="section card plan" id="plan"></div>` : ""}
       <div class="section">
         <h3>Check real sold prices</h3>
@@ -1604,6 +1602,7 @@
       </div>
     `;
     $("#add-comp-2").addEventListener("click", () => editComp(target));
+    $$("[data-suggest]", out).forEach((b) => b.addEventListener("click", () => { ui.mq = b.dataset.suggest; $("#mq").value = ui.mq; drawMarket(); window.scrollTo({ top: 0 }); }));
     if (exactRef) drawPlan(target);
     let qkind = "sold";
     $$("[data-qkind]", out).forEach((b) => b.addEventListener("click", () => {
@@ -1629,7 +1628,30 @@
     $$(".item[data-comp]", out).forEach((b) => b.addEventListener("click", () => editComp(db.comps.find((c) => c.id === b.dataset.comp))));
   }
 
+  /* One-glance answer for a reference: what sellers ask, what it really sells for, what to pay. */
+  function drawSnapshot(target) {
+    const box = $("#snapshot");
+    if (!box) return;
+    const m180 = marketFor(target);
+    const bm = bestMedian(target);
+    const mb = bm && maxBuy(bm.m.median);
+    const p = buyPlan();
+    const ask = m180.askingCount ? m180.askingMedian : null;
+    const sell = bm ? bm.m.median : null;
+    const tile = (label, val, sub, cls = "") => `<div class="snap-tile ${cls}"><div class="label">${label}</div><div class="snap-val">${val}</div><div class="sub">${sub}</div></div>`;
+    box.innerHTML = `
+      <h3 style="margin:0 0 10px">Market snapshot</h3>
+      <div class="snap-row">
+        ${tile("Sellers ask", ask ? money0(ask) : "—", ask ? `median of ${m180.askingCount} listing${m180.askingCount > 1 ? "s" : ""}` : "log asks from the links below")}
+        ${tile("Actually sells", sell ? money0(sell) : "—", sell ? `median of ${bm.m.soldCount} sale${bm.m.soldCount > 1 ? "s" : ""} · ${bm.days} days` : "log sold prices below")}
+        ${tile("Buy at or below", mb ? money0(mb.max) : "—", mb ? (p.profit ? `for ${money0(p.profit)} profit` : "break-even — set your profit") : "needs sold prices", "buy")}
+      </div>
+      ${ask && sell ? `<p class="snap-gap">Sellers are asking <strong>${pct(Math.abs(ask - sell) / sell)} ${ask >= sell ? "above" : "below"}</strong> what it really sells for (${ask >= sell ? "+" : "−"}${money0(Math.abs(ask - sell))}).</p>` : ""}
+      ${mb && !p.profit && !p.fee ? `<p class="snap-gap">Set your selling fees and target profit in <strong>What to pay</strong> below to get your true buy price.</p>` : ""}`;
+  }
+
   function drawPlan(target) {
+    drawSnapshot(target);
     const box = $("#plan");
     if (!box) return;
     const bm = bestMedian(target);

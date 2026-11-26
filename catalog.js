@@ -389,5 +389,5 @@ PAM01312|Panerai|Luminor Marina|44 mm steel
     return p ? { brand: p[1], model: "", caseInfo: "", how: "pattern" } : null;
   }
 
-  return { lookup, count: rows.length + C.REFS.length };
+  return { lookup, count: rows.length + C.REFS.length, refs: [...C.REFS.map((r) => r.ref), ...rows.map((r) => r.ref)] };
 })();
