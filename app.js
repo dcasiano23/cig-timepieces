@@ -5,8 +5,8 @@
   "use strict";
 
   const KEY = "watch-ledger.v1";
-  const APP_VERSION = "1.7";
-  const WHATS_NEW = "Market now opens with a snapshot: what sellers ask, what it really sells for, and what to pay.";
+  const APP_VERSION = "1.8";
+  const WHATS_NEW = "Live market data: connect your helper in Business to fill in eBay asking prices automatically.";
   const CAT = window.WatchCatalog;
   const DOCS = window.WatchDocs;
   const $ = (sel, root = document) => root.querySelector(sel);
@@ -1533,7 +1533,9 @@
 
     const target = guessFromQuery(q);
     const entry = CAT.find(q);
-    const exactRef = !!entry || db.comps.some((c) => normRef(c.ref) === normRef(q)) || db.watches.some((w) => normRef(w.ref) === normRef(q));
+    const known = !!entry || CAT.REFDB.lookup(q)?.how === "list" || db.comps.some((c) => normRef(c.ref) === normRef(q)) || db.watches.some((w) => normRef(w.ref) === normRef(q));
+    const longer = [...CAT.REFDB.refs, ...db.watches.map((w) => w.ref), ...db.comps.map((c) => c.ref)].some((r) => r && normRef(r).startsWith(normRef(q)) && normRef(r) !== normRef(q));
+    const exactRef = known || (/\d/.test(q) && normRef(q).length >= 5 && !longer);
     let comps, m90, m180, mAll;
     if (exactRef) {
       m90 = marketFor(target, { days: 90 });
@@ -1603,7 +1605,7 @@
     `;
     $("#add-comp-2").addEventListener("click", () => editComp(target));
     $$("[data-suggest]", out).forEach((b) => b.addEventListener("click", () => { ui.mq = b.dataset.suggest; $("#mq").value = ui.mq; drawMarket(); window.scrollTo({ top: 0 }); }));
-    if (exactRef) drawPlan(target);
+    if (exactRef) { drawPlan(target); drawSnapshot(target); }
     let qkind = "sold";
     $$("[data-qkind]", out).forEach((b) => b.addEventListener("click", () => {
       qkind = b.dataset.qkind;
@@ -1628,30 +1630,80 @@
     $$(".item[data-comp]", out).forEach((b) => b.addEventListener("click", () => editComp(db.comps.find((c) => c.id === b.dataset.comp))));
   }
 
+  /* ---------- Live market data (your Cloudflare helper) ---------- */
+  const liveOn = () => !!(db.settings.helperUrl && db.settings.helperCode);
+  const liveMem = new Map();
+  const LIVE_TTL = 6 * 60 * 60 * 1000;
+  async function helperGet(path) {
+    const base = db.settings.helperUrl.replace(/\/+$/, "");
+    const res = await withTimeout(fetch(base + path, { headers: { "X-Access-Code": db.settings.helperCode } }), 20000, null);
+    if (!res) throw new Error("The helper didn't answer in time.");
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `Helper error ${res.status}`);
+    return data;
+  }
+  async function liveLookup(target, fresh = false) {
+    const ref = (target.ref || "").toUpperCase();
+    const key = "live:" + normRef(ref);
+    if (!fresh) {
+      const m = liveMem.get(key);
+      if (m && Date.now() - m.at < LIVE_TTL) return m.data;
+      try { const s = JSON.parse(localStorage.getItem(key) || "null"); if (s && Date.now() - s.at < LIVE_TTL) { liveMem.set(key, s); return s.data; } } catch {}
+    }
+    const data = await helperGet(`/lookup?ref=${encodeURIComponent(ref)}&brand=${encodeURIComponent(target.brand || "")}${fresh ? "&fresh=1" : ""}`);
+    const rec = { at: Date.now(), data };
+    liveMem.set(key, rec);
+    try { localStorage.setItem(key, JSON.stringify(rec)); } catch {}
+    return data;
+  }
+
   /* One-glance answer for a reference: what sellers ask, what it really sells for, what to pay. */
-  function drawSnapshot(target) {
+  function drawSnapshot(target, live, liveState) {
     const box = $("#snapshot");
     if (!box) return;
+    if (live === undefined && liveOn()) {
+      // show what we have now, then fill in live prices
+      drawSnapshot(target, null, "loading");
+      liveLookup(target).then((d) => { if ($("#snapshot") === box) drawSnapshot(target, d, "ok"); })
+        .catch((e) => { if ($("#snapshot") === box) drawSnapshot(target, null, e.message); });
+      return;
+    }
     const m180 = marketFor(target);
     const bm = bestMedian(target);
     const mb = bm && maxBuy(bm.m.median);
     const p = buyPlan();
-    const ask = m180.askingCount ? m180.askingMedian : null;
+    const eb = live?.ebay && live.ebay.count ? live.ebay : null;
+    const ask = eb ? eb.median : m180.askingCount ? m180.askingMedian : null;
+    const askSub = eb ? `eBay now · ${eb.count} listing${eb.count > 1 ? "s" : ""}${m180.askingCount ? ` · your logs ${money0(m180.askingMedian)}` : ""}`
+      : ask ? `median of ${m180.askingCount} logged listing${m180.askingCount > 1 ? "s" : ""}` : liveState === "loading" ? "checking eBay…" : "log asks from the links below";
     const sell = bm ? bm.m.median : null;
     const tile = (label, val, sub, cls = "") => `<div class="snap-tile ${cls}"><div class="label">${label}</div><div class="snap-val">${val}</div><div class="sub">${sub}</div></div>`;
     box.innerHTML = `
       <h3 style="margin:0 0 10px">Market snapshot</h3>
       <div class="snap-row">
-        ${tile("Sellers ask", ask ? money0(ask) : "—", ask ? `median of ${m180.askingCount} listing${m180.askingCount > 1 ? "s" : ""}` : "log asks from the links below")}
+        ${tile("Sellers ask", ask ? money0(ask) : liveState === "loading" ? "…" : "—", askSub)}
         ${tile("Actually sells", sell ? money0(sell) : "—", sell ? `median of ${bm.m.soldCount} sale${bm.m.soldCount > 1 ? "s" : ""} · ${bm.days} days` : "log sold prices below")}
         ${tile("Buy at or below", mb ? money0(mb.max) : "—", mb ? (p.profit ? `for ${money0(p.profit)} profit` : "break-even — set your profit") : "needs sold prices", "buy")}
       </div>
       ${ask && sell ? `<p class="snap-gap">Sellers are asking <strong>${pct(Math.abs(ask - sell) / sell)} ${ask >= sell ? "above" : "below"}</strong> what it really sells for (${ask >= sell ? "+" : "−"}${money0(Math.abs(ask - sell))}).</p>` : ""}
-      ${mb && !p.profit && !p.fee ? `<p class="snap-gap">Set your selling fees and target profit in <strong>What to pay</strong> below to get your true buy price.</p>` : ""}`;
+      ${mb && !p.profit && !p.fee ? `<p class="snap-gap">Set your selling fees and target profit in <strong>What to pay</strong> below to get your true buy price.</p>` : ""}
+      ${eb ? `<details class="live-list"><summary>Cheapest on eBay right now (${eb.count} listing${eb.count > 1 ? "s" : ""}, ${money0(eb.low)}–${money0(eb.high)})</summary>
+          <div class="list">${eb.cheapest.slice(0, 6).map((it) => `<a class="item live-item" href="${esc(it.url)}" target="_blank" rel="noopener">
+            <div class="thumb">${it.image ? `<img class="pic photo" src="${esc(it.image)}" alt="" loading="lazy">` : `<div class="ph ph-sm"><span>e</span></div>`}</div>
+            <div class="item-main"><div class="title live-title">${esc(it.title)}</div><div class="meta">${esc(it.condition)}</div></div>
+            <div class="right"><div class="big">${money0(it.price)}</div><div class="meta">asking</div></div></a>`).join("")}</div>
+        </details>` : ""}
+      ${liveOn() ? `<div class="live-foot">${liveState === "loading" ? "Checking eBay…" : liveState === "ok" ? `Live eBay prices · updated ${esc(fmtWhen(live?.fetched))}` : liveState ? `<span class="neg">Live prices unavailable: ${esc(liveState)}</span>` : ""}
+          ${liveState !== "loading" ? `<button type="button" class="linkbtn" id="live-refresh">Refresh</button>` : ""}</div>`
+        : `<p class="snap-gap">Want these filled in automatically? Turn on <a href="#settings">Live market data</a> in Business.</p>`}`;
+    $("#live-refresh", box)?.addEventListener("click", () => {
+      drawSnapshot(target, null, "loading");
+      liveLookup(target, true).then((d) => drawSnapshot(target, d, "ok")).catch((e) => drawSnapshot(target, null, e.message));
+    });
   }
 
   function drawPlan(target) {
-    drawSnapshot(target);
+    drawSnapshot(target, liveMem.get("live:" + normRef(target.ref || ""))?.data ?? null, liveMem.has("live:" + normRef(target.ref || "")) ? "ok" : undefined);
     const box = $("#plan");
     if (!box) return;
     const bm = bestMedian(target);
@@ -1838,6 +1890,18 @@
         </div>
       </div>
 
+      <form class="section card form" id="live-form" autocomplete="off" novalidate>
+        <h3 style="margin:0">Live market data</h3>
+        <p class="muted" style="margin:0;font-size:13px">Connect your private helper so Market fills in live eBay asking prices automatically when you type a reference. <a href="https://github.com/dcasiano23/cig-timepieces/blob/main/helper/README.md" target="_blank" rel="noopener">Setup guide</a></p>
+        <label>Helper address<input name="helperUrl" type="url" inputmode="url" value="${esc(db.settings.helperUrl || "")}" placeholder="https://cig-market.yourname.workers.dev"></label>
+        <label>Access code<input name="helperCode" type="password" value="${esc(db.settings.helperCode || "")}" autocomplete="off"></label>
+        <div class="live-status" id="live-status"></div>
+        <div class="actions" style="position:static;background:none;padding:0">
+          ${db.settings.helperUrl ? `<button type="button" class="btn danger" id="live-off">Turn off</button>` : ""}
+          <button type="submit" class="btn primary">Save &amp; test</button>
+        </div>
+      </form>
+
       <div class="section card">
         <h3>Spreadsheets</h3>
         <div class="row-actions">
@@ -1935,6 +1999,23 @@
     $("#csv-comps").addEventListener("click", () => download(`market-comps-${today()}.csv`, compsCSV(), "text/csv"));
     $("#cur").addEventListener("change", (e) => { db.settings.currency = e.target.value; save(); setFormats(); toast("Currency updated"); });
     $("#theme").addEventListener("change", (e) => { db.settings.theme = e.target.value; save(); applyTheme(); });
+    $("#live-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const f = e.target, st = $("#live-status");
+      let url = f.helperUrl.value.trim();
+      if (url && !/^https?:\/\//i.test(url)) url = "https://" + url;
+      db.settings.helperUrl = url;
+      db.settings.helperCode = f.helperCode.value.trim();
+      save();
+      liveMem.clear();
+      if (!url || !db.settings.helperCode) { st.innerHTML = `<span class="neg">Enter both the helper address and the access code.</span>`; return; }
+      st.textContent = "Testing…";
+      try {
+        const r = await helperGet("/ping");
+        st.innerHTML = `<span class="pos">✓ Connected.</span> eBay ${r.sources?.ebay ? "✓" : "— keys not set"} · WatchCharts ${r.sources?.watchcharts ? "✓" : "— not set yet"}`;
+      } catch (err) { st.innerHTML = `<span class="neg">Couldn't connect: ${esc(err.message)}</span>`; }
+    });
+    $("#live-off")?.addEventListener("click", () => { delete db.settings.helperUrl; delete db.settings.helperCode; save(); liveMem.clear(); render(); toast("Live market data turned off"); });
     $("#inv-next").addEventListener("change", (e) => { const n = parseInt(e.target.value, 10); if (n > 0) { db.settings.nextInvoice = n; save(); toast("Invoice numbering updated"); } });
     $("#demo").addEventListener("click", async () => {
       if (db.watches.length && !(await ask("Add sample data alongside your existing data?", { ok: "Add sample data" }))) return;
