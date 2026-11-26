@@ -1478,6 +1478,20 @@
     </div>`;
   }
 
+  /* For-sale listings. These are ASKING prices — shown separately and never mixed into sold comps. */
+  function askLinks(q, brand, median) {
+    const enc = encodeURIComponent(q);
+    const named = encodeURIComponent(`${brand ? brand + " " : ""}${q}`);
+    const floor = median ? `&_udlo=${Math.floor((median * 0.4) / 100) * 100}` : "";
+    return `<div class="links">
+      <a class="btn small" target="_blank" rel="noopener" href="https://www.chrono24.com/search/index.htm?query=${enc}">Chrono24</a>
+      <a class="btn small" target="_blank" rel="noopener" href="https://www.ebay.com/sch/i.html?_nkw=${enc}&_sacat=31387&LH_BIN=1&_sop=15${floor}">eBay — Buy It Now</a>
+      <a class="btn small" target="_blank" rel="noopener" href="https://www.facebook.com/marketplace/search/?query=${named}">Facebook Marketplace</a>
+      <a class="btn small" target="_blank" rel="noopener" href="https://www.reddit.com/r/Watchexchange/search/?q=${enc}&restrict_sr=1&sort=new">Reddit r/Watchexchange</a>
+      <a class="btn small" target="_blank" rel="noopener" href="https://www.google.com/search?tbm=shop&q=${named}">Google Shopping</a>
+    </div>`;
+  }
+
   function drawMarket() {
     const out = $("#mresult");
     const q = ui.mq.trim();
@@ -1548,20 +1562,37 @@
           ${mineHist && mineHist.paid.length ? `<div class="note" style="margin-top:10px">You've paid ${mineHist.paid.map((x) => money0(num(x.buyPrice))).slice(0, 6).join(", ")}${mineHist.paid.length > 6 ? "…" : ""} for this reference (most recent first).</div>` : ""}`
         : `<h2>Comps matching “${esc(q)}”</h2>`}
       </div>
+      ${exactRef && m180.median && m180.askingCount ? `<div class="section card gap-card">
+        <h3 style="margin:0 0 10px">Asking vs. actually selling · 180 days</h3>
+        <div class="gap-row">
+          <div><div class="label">Sellers ask</div><div class="gap-val">${money0(m180.askingMedian)}</div><div class="sub">median of ${m180.askingCount} listing${m180.askingCount > 1 ? "s" : ""}</div></div>
+          <div><div class="label">Actually sells</div><div class="gap-val">${money0(m180.median)}</div><div class="sub">median of ${m180.soldCount} sale${m180.soldCount > 1 ? "s" : ""}</div></div>
+          <div><div class="label">Gap</div><div class="gap-val ${m180.askingMedian >= m180.median ? "neg" : "pos"}">${m180.askingMedian >= m180.median ? "+" : "−"}${money0(Math.abs(m180.askingMedian - m180.median))}</div><div class="sub">${pct(Math.abs(m180.askingMedian - m180.median) / m180.median)} ${m180.askingMedian >= m180.median ? "above" : "below"} real sales</div></div>
+        </div>
+      </div>` : ""}
       ${exactRef ? `<div class="section card plan" id="plan"></div>` : ""}
       <div class="section">
         <h3>Check real sold prices</h3>
         ${soldLinks(q, (m90?.median || m180?.median))}
         <div class="note" style="margin-top:8px"><strong>Sold only.</strong> The eBay button shows completed sales for this reference, newest first, in Wristwatches${m180?.median ? ", hiding cheap results like straps and boxes" : ""}.
           If a result says <strong>“Best offer accepted”</strong>, the price shown is what the seller <em>asked</em> — eBay hides what it really sold for, which is usually lower. <strong>Skip those results</strong> unless you know the actual price.
-          Chrono24 and dealer sites only show watches <em>for sale</em>, so they're not used for comps here.</div>
+          Chrono24 and dealer sites show watches <em>for sale</em>, so they're listed separately below under <strong>What sellers are asking</strong>.</div>
+      </div>
+      <div class="section">
+        <h3>What sellers are asking</h3>
+        ${askLinks(q, target.brand, (m90?.median || m180?.median))}
+        <div class="note ask-note" style="margin-top:8px"><strong>For sale — not sold.</strong> These show what sellers are <em>asking</em> right now. Log them as <strong>Asking</strong> below: they're kept separate and never change your market median or max buy price — they show how far asks sit above real sales.</div>
       </div>
       <form class="section card form" id="quick" autocomplete="off" novalidate>
-        <h3 style="margin:0">Add the sold prices you just looked up</h3>
-        <label>Sold prices<input name="prices" inputmode="decimal" placeholder="e.g. 13,100  12,950  13,300"></label>
+        <h3 style="margin:0" id="quick-title">Add the prices you just looked up</h3>
+        <div class="chips" role="radiogroup" aria-label="Sold or asking">
+          <button type="button" class="chip" data-qkind="sold" aria-pressed="true">Sold prices</button>
+          <button type="button" class="chip" data-qkind="asking" aria-pressed="false">Asking prices</button>
+        </div>
+        <label><span id="quick-label">Sold prices</span><input name="prices" inputmode="decimal" placeholder="e.g. 13,100  12,950  13,300"></label>
         <div class="grid2">
           <label>Source<select name="source">${options(SOURCES, "eBay (sold)")}</select></label>
-          <label>Date sold<input type="date" name="date" value="${today()}"></label>
+          <label><span id="quick-date">Date sold</span><input type="date" name="date" value="${today()}"></label>
         </div>
         <div class="actions" style="position:static;background:none;padding:0"><button type="submit" class="btn primary">Add sold prices</button></div>
       </form>
@@ -1572,15 +1603,25 @@
     `;
     $("#add-comp-2").addEventListener("click", () => editComp(target));
     if (exactRef) drawPlan(target);
+    let qkind = "sold";
+    $$("[data-qkind]", out).forEach((b) => b.addEventListener("click", () => {
+      qkind = b.dataset.qkind;
+      $$("[data-qkind]", out).forEach((x) => x.setAttribute("aria-pressed", x === b));
+      const f = $("#quick");
+      f.source.innerHTML = options(qkind === "sold" ? SOURCES : ASK_SOURCES, qkind === "sold" ? "eBay (sold)" : "Chrono24 listing");
+      $("#quick-label").textContent = qkind === "sold" ? "Sold prices" : "Asking prices";
+      $("#quick-date").textContent = qkind === "sold" ? "Date sold" : "Date seen";
+      f.classList.toggle("asking", qkind === "asking");
+    }));
     $("#quick").addEventListener("submit", (e) => {
       e.preventDefault();
       const f = e.target;
       const prices = (f.prices.value.match(/\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?/g) || []).map((x) => num(x)).filter((x) => x > 0);
       if (!prices.length) { toast("Type one or more prices first."); return; }
       const ref = (target.ref || q).toUpperCase();
-      prices.forEach((price) => db.comps.push({ id: uid(), created: new Date().toISOString(), kind: "sold", ref, brand: target.brand || "", model: target.model || "", price, date: f.date.value || today(), source: f.source.value, condition: "", set: "", link: "", notes: "" }));
+      prices.forEach((price) => db.comps.push({ id: uid(), created: new Date().toISOString(), kind: qkind, ref, brand: target.brand || "", model: target.model || "", price, date: f.date.value || today(), source: f.source.value, condition: "", set: "", link: "", notes: "" }));
       save(); drawMarket();
-      toast(`${prices.length} sold price${prices.length > 1 ? "s" : ""} added`);
+      toast(`${prices.length} ${qkind === "sold" ? "sold" : "asking"} price${prices.length > 1 ? "s" : ""} added`);
     });
     $("#see-cfg")?.addEventListener("click", () => showFamily(entry.family, entry.ref));
     $$(".item[data-comp]", out).forEach((b) => b.addEventListener("click", () => editComp(db.comps.find((c) => c.id === b.dataset.comp))));
@@ -1637,7 +1678,7 @@
   }
 
   const SOURCES = ["eBay (sold)", "Auction result (realized price)", "Forum / dealer group (sold)", "Private sale", "My own sale", "Other (sold)"];
-  const ASK_SOURCES = ["Chrono24 listing", "eBay active listing", "Dealer listing", "Instagram / forum listing", "Other listing"];
+  const ASK_SOURCES = ["Chrono24 listing", "eBay Buy It Now listing", "Facebook Marketplace", "Facebook group (dealer ask)", "Reddit r/Watchexchange", "Dealer website", "Instagram listing", "Other listing"];
 
   function editComp(c = {}) {
     const isNew = !c.id;
